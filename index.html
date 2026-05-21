@@ -1832,13 +1832,14 @@ function buildCalList() {
     // Task list
     if(data.tasks&&data.tasks.length){
       html+='<div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px">';
-      data.tasks.forEach(function(tk){
+      data.tasks.forEach(function(tk, tki){
         var priColor = tk.pri==='hi' ? '#C2490D' : tk.pri==='lo' ? '#9ca3af' : '#B45309';
         var doneSty = tk.done ? 'color:var(--color-text-tertiary);text-decoration:line-through;' : '';
-        html+='<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#fff;border-radius:8px;border:1px solid #e5e7eb;'+doneSty+'">';
-        html+='<span style="width:7px;height:7px;border-radius:50%;background:'+priColor+';flex-shrink:0"></span>';
+        html+='<div onclick="toggleCalTaskDone(\''+key+'\','+tki+')" style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#fff;border-radius:8px;border:1px solid #e5e7eb;'+doneSty+'cursor:pointer" title="Click to toggle done">';
+        html+='<span style="width:7px;height:7px;border-radius:50%;background:'+(tk.done?'#d1d5db':priColor)+';flex-shrink:0"></span>';
         html+='<span style="font-size:12.5px;flex:1">'+escHtml(tk.txt)+'</span>';
-        if(tk.pri==='hi') html+='<span style="font-size:10px;font-weight:600;color:'+priColor+'">HIGH</span>';
+        if(!tk.done && tk.pri==='hi') html+='<span style="font-size:10px;font-weight:600;color:'+priColor+'">HIGH</span>';
+        if(tk.done) html+='<span style="font-size:10px;color:#9ca3af">✓</span>';
         html+='</div>';
       });
       html+='</div>';
@@ -2298,6 +2299,15 @@ function toggleMonth(mid) {
   if(chev) chev.style.transform = open ? 'rotate(-90deg)' : 'rotate(0deg)';
 }
 
+function toggleCalTaskDone(key, idx) {
+  if(!CAL_DATA[key] || !CAL_DATA[key].tasks[idx]) return;
+  CAL_DATA[key].tasks[idx].done = !CAL_DATA[key].tasks[idx].done;
+  if(!CAL_OVERRIDES[key]) CAL_OVERRIDES[key] = {};
+  CAL_OVERRIDES[key].tasks = CAL_DATA[key].tasks;
+  saveCalOverrides();
+  buildCalList();
+}
+
 function toggleTaskChk(el) {
   el.classList.toggle('checked');
   el.innerHTML = el.classList.contains('checked') ? '<i class="ti ti-check"></i>' : '';
@@ -2356,11 +2366,11 @@ document.addEventListener('DOMContentLoaded', function() {
   dashInit();
   renderCrewCard();
   applyRoleUI();
-  loadCalComments().then(function(){ buildCalList(); });
+  loadCalComments(); loadCalOverrides(); buildCalList();
   loadTasks();
 });
 // Also init immediately in case DOMContentLoaded already fired
-if(document.readyState !== 'loading') { dashInit(); renderCrewCard(); applyRoleUI(); loadCalComments().then(function(){ buildCalList(); }); loadTasks(); }
+if(document.readyState !== 'loading') { dashInit(); renderCrewCard(); applyRoleUI(); loadCalComments(); buildCalList(); loadTasks(); }
 // ── Auto-refresh: keep calendar "today" and dashboard cards current ──
 setInterval(function() {
   // Rebuild calendar if visible (keeps today-row highlight accurate)
@@ -2373,15 +2383,36 @@ setInterval(function() {
 
 // ─── CALENDAR COMMENTS ───────────────────────────────────────────────────────
 
-async function loadCalComments() {
+function loadCalComments() {
   try {
-    var res = await window.storage.get('cal-comments');
-    if(res && res.value) CAL_COMMENTS = JSON.parse(res.value);
+    var raw = localStorage.getItem('cal-comments');
+    if(raw) CAL_COMMENTS = JSON.parse(raw);
   } catch(e) {}
 }
 
-async function saveCalComments() {
-  try { await window.storage.set('cal-comments', JSON.stringify(CAL_COMMENTS)); } catch(e) {}
+function saveCalComments() {
+  try { localStorage.setItem('cal-comments', JSON.stringify(CAL_COMMENTS)); } catch(e) {}
+}
+
+// ─── CAL_DATA OVERRIDES (persists admin edits: task done states, added entries) ──
+var CAL_OVERRIDES = {}; // key → {tasks:[...], events:[...]}
+
+function saveCalOverrides() {
+  try { localStorage.setItem('cal-overrides', JSON.stringify(CAL_OVERRIDES)); } catch(e) {}
+}
+
+function loadCalOverrides() {
+  try {
+    var raw = localStorage.getItem('cal-overrides');
+    if(raw) {
+      CAL_OVERRIDES = JSON.parse(raw);
+      Object.keys(CAL_OVERRIDES).forEach(function(key) {
+        if(!CAL_DATA[key]) CAL_DATA[key] = { events:[], tasks:[], crew:{avail:[],off:[]} };
+        if(CAL_OVERRIDES[key].tasks) CAL_DATA[key].tasks = CAL_OVERRIDES[key].tasks;
+        if(CAL_OVERRIDES[key].events) CAL_DATA[key].events = CAL_OVERRIDES[key].events;
+      });
+    }
+  } catch(e) {}
 }
 
 function submitCalComment(key) {
@@ -2425,11 +2456,15 @@ function submitCalAddTask() {
   if(!taskTxt) { alert('Please enter a task description.'); return; }
   var parts = dateVal.split('-');
   var key = +parts[0]+'-'+(+parts[1])+'-'+(+parts[2]);
-  if(!CAL_DATA[key]) CAL_DATA[key] = { events:[{t:'wk',l:taskTxt,icon:'ti-checklist'}], tasks:[], crew:{avail:[],off:[]} };
+  if(!CAL_DATA[key]) CAL_DATA[key] = { events:[{t:'wp',l:taskTxt,icon:'ti-checklist'}], tasks:[], crew:{avail:[],off:[]} };
   if(!CAL_DATA[key].tasks.some(function(tk){ return tk.txt===taskTxt; }))
     CAL_DATA[key].tasks.push({ txt:taskTxt, pri:pri, done:false });
   if(!TASKS.some(function(t){ return t.task===taskTxt && t.date===dateVal; }))
     TASKS.push({ id:'t'+Date.now(), task:taskTxt, by:by, remarks:[], status:'open', date:dateVal });
+  if(!CAL_OVERRIDES[key]) CAL_OVERRIDES[key] = {};
+  CAL_OVERRIDES[key].tasks = CAL_DATA[key].tasks;
+  CAL_OVERRIDES[key].events = CAL_DATA[key].events;
+  saveCalOverrides();
   saveTasks();
   renderTasks();
   buildCalList();
@@ -2584,15 +2619,15 @@ var TASKS = [
   { id: 't63', task: 'Change tires for transport', by: '', remarks: [], status: 'open', date: '' },
 ];
 
-async function saveTasks() {
-  try { await window.storage.set('tasks', JSON.stringify(TASKS)); } catch(e) {}
+function saveTasks() {
+  try { localStorage.setItem('tasks', JSON.stringify(TASKS)); } catch(e) {}
 }
 
-async function loadTasks() {
+function loadTasks() {
   try {
-    var res = await window.storage.get('tasks');
-    if(res && res.value) {
-      var stored = JSON.parse(res.value);
+    var raw = localStorage.getItem('tasks');
+    if(raw) {
+      var stored = JSON.parse(raw);
       if(stored && stored.length > 0) TASKS = stored;
     }
   } catch(e) {}
@@ -2772,14 +2807,14 @@ function submitRemark() {
 
 // ─── INVENTORY REQUESTS ───────────────────────────────────────────────────────
 
-async function saveInvRequests(reqs) {
-  try { await window.storage.set('inv-requests', JSON.stringify(reqs)); } catch(e) {}
+function saveInvRequests(reqs) {
+  try { localStorage.setItem('inv-requests', JSON.stringify(reqs)); } catch(e) {}
 }
 
-async function loadInvRequests() {
+function loadInvRequests() {
   try {
-    var res = await window.storage.get('inv-requests');
-    return res && res.value ? JSON.parse(res.value) : [];
+    var raw = localStorage.getItem('inv-requests');
+    return raw ? JSON.parse(raw) : [];
   } catch(e) { return []; }
 }
 
@@ -2795,9 +2830,9 @@ async function submitInvReq() {
   var item = document.getElementById('invreq-item').value.trim();
   var reason = document.getElementById('invreq-reason').value.trim();
   if(!item) { alert('Please describe the item.'); return; }
-  var reqs = await loadInvRequests();
+  var reqs = loadInvRequests();
   reqs.push({ id: 'r'+Date.now(), type: document.getElementById('invreq-type').value, item: item, reason: reason, by: SESSION.fullName, ts: Date.now(), status: 'pending' });
-  await saveInvRequests(reqs);
+  saveInvRequests(reqs);
   closeInvReq();
   showCalToast('Request submitted. An admin will review it.');
 }
