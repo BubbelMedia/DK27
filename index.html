@@ -2298,7 +2298,7 @@ function toggleMonth(mid) {
   if(chev) chev.style.transform = open ? 'rotate(-90deg)' : 'rotate(0deg)';
 }
 
-
+function toggleTaskChk(el) {
   el.classList.toggle('checked');
   el.innerHTML = el.classList.contains('checked') ? '<i class="ti ti-check"></i>' : '';
 }
